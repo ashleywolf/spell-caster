@@ -250,6 +250,111 @@ canvas {
 .stats-row { font-size: 13px; color: #8b949e; margin-bottom: 3px; }
 .new-high { font-size: 24px; font-weight: 800; color: #f7d060; margin-bottom: 8px; animation: pulse 1s infinite; }
 #start-screen .high-score { font-size: 14px; color: #f7d060; margin-bottom: 16px; min-height: 20px; }
+#game-over, #win-screen { overflow-y: auto; padding: 40px 20px; }
+
+/* GitHub username input */
+.gh-username-section {
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.gh-username-section input {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  color: #e6edf3;
+  font-size: 14px;
+  padding: 8px 12px;
+  width: 200px;
+  outline: none;
+  font-family: inherit;
+}
+.gh-username-section input:focus { border-color: #f7d060; }
+.gh-username-section input::placeholder { color: #484f58; }
+.gh-avatar-preview {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 2px solid #30363d;
+  background: #21262d;
+  display: none;
+}
+
+/* Leaderboard */
+.lb-container {
+  border: 1px solid #f7d060;
+  border-radius: 10px;
+  background: rgba(22, 27, 34, 0.95);
+  padding: 14px 18px;
+  margin-top: 12px;
+  max-width: 480px;
+  width: 100%;
+}
+.lb-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #f7d060;
+  text-align: center;
+  margin-bottom: 10px;
+  letter-spacing: 2px;
+}
+.lb-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.lb-table th {
+  color: #8b949e;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 1px;
+  padding: 4px 6px;
+  border-bottom: 1px solid #30363d;
+  text-align: left;
+}
+.lb-table td {
+  padding: 5px 6px;
+  color: #e6edf3;
+  border-bottom: 1px solid #21262d;
+  vertical-align: middle;
+}
+.lb-table tr.lb-current { background: rgba(247, 208, 96, 0.1); }
+.lb-table tr.lb-current td { color: #f7d060; font-weight: 600; }
+.lb-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  vertical-align: middle;
+  background: #21262d;
+}
+.lb-anon {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #484f58;
+  display: inline-block;
+  vertical-align: middle;
+}
+.lb-rank { width: 30px; text-align: center; }
+.lb-score { font-weight: 700; }
+.lb-save-btn {
+  display: inline-block;
+  background: #f7d060;
+  color: #0d1117;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 20px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  margin-top: 10px;
+  font-family: inherit;
+}
+.lb-save-btn:hover { background: #e5c04b; }
+.lb-save-btn:disabled { background: #30363d; color: #8b949e; cursor: default; }
+.lb-save-hint { font-size: 12px; color: #8b949e; margin-top: 8px; }
+.lb-compact { max-width: 380px; margin-top: 16px; margin-bottom: 8px; }
+.lb-compact .lb-title { font-size: 14px; margin-bottom: 8px; }
+.lb-compact .lb-table { font-size: 11px; }
+.lb-compact .lb-avatar, .lb-compact .lb-anon { width: 20px; height: 20px; }
 </style>
 </head>
 <body>
@@ -279,8 +384,13 @@ canvas {
 <div id="start-screen">
   <h1>SPELL CASTER</h1>
   <div class="subtitle">Shout spells to defend your tower</div>
+  <div class="gh-username-section" onclick="event.stopPropagation()">
+    <img class="gh-avatar-preview" id="gh-avatar-start" alt="">
+    <input type="text" id="gh-username-input" placeholder="Your GitHub username" autocomplete="off" spellcheck="false">
+  </div>
   <div class="high-score" id="high-score-display"></div>
   <div class="spell-ref" id="spell-ref"></div>
+  <div id="title-leaderboard" class="lb-container lb-compact" onclick="event.stopPropagation()" style="display:none"></div>
   <div class="begin">Say "START" or click anywhere to begin</div>
   <div class="note">Requires Chrome/Edge with microphone access</div>
 </div>
@@ -292,6 +402,8 @@ canvas {
   <div class="final-score" id="go-wave"></div>
   <div class="new-high" id="go-new-high" style="display:none">NEW HIGH SCORE!</div>
   <div id="go-stats"></div>
+  <div id="go-save-area" style="text-align:center"></div>
+  <div id="go-leaderboard" class="lb-container" onclick="event.stopPropagation()" style="display:none"></div>
   <div class="restart">Click or say "START" to play again</div>
 </div>
 
@@ -301,6 +413,8 @@ canvas {
   <div class="final-score" id="win-score"></div>
   <div class="new-high" id="win-new-high" style="display:none">NEW HIGH SCORE!</div>
   <div id="win-stats"></div>
+  <div id="win-save-area" style="text-align:center"></div>
+  <div id="win-leaderboard" class="lb-container" onclick="event.stopPropagation()" style="display:none"></div>
   <div class="restart">Click or say "START" to play again</div>
 </div>
 
@@ -1239,6 +1353,7 @@ function gameOver() {
   document.getElementById("go-wave").textContent = "Reached Wave " + (currentWave + 1);
   document.getElementById("go-new-high").style.display = isNewHigh ? "block" : "none";
   document.getElementById("go-stats").innerHTML = buildStatsHTML();
+  renderEndScreenLeaderboard('go-leaderboard', 'go-save-area', score, currentWave + 1);
 }
 
 function winGame() {
@@ -1253,6 +1368,7 @@ function winGame() {
   document.getElementById("win-score").textContent = "Final Score: " + score;
   document.getElementById("win-new-high").style.display = isNewHigh ? "block" : "none";
   document.getElementById("win-stats").innerHTML = buildStatsHTML();
+  renderEndScreenLeaderboard('win-leaderboard', 'win-save-area', score, currentWave + 1);
   playSound("waveComplete");
 }
 
@@ -2023,6 +2139,155 @@ function updateHighScoreDisplay() {
   }
 }
 
+// ========== LEADERBOARD ==========
+
+function getLeaderboard() {
+  try { return JSON.parse(localStorage.getItem('spellCaster_leaderboard') || '[]'); }
+  catch(e) { return []; }
+}
+
+function saveLeaderboard(lb) {
+  localStorage.setItem('spellCaster_leaderboard', JSON.stringify(lb));
+}
+
+function getGitHubUsername() {
+  return localStorage.getItem('github_username') || '';
+}
+
+function setGitHubUsername(name) {
+  localStorage.setItem('github_username', name);
+}
+
+function qualifiesForLeaderboard(newScore) {
+  const lb = getLeaderboard();
+  if (lb.length < 10) return true;
+  return newScore > lb[lb.length - 1].score;
+}
+
+function addToLeaderboard(entry) {
+  let lb = getLeaderboard();
+  lb.push(entry);
+  lb.sort(function(a, b) { return b.score - a.score; });
+  if (lb.length > 10) lb = lb.slice(0, 10);
+  saveLeaderboard(lb);
+  return lb;
+}
+
+function formatLBDate(dateStr) {
+  var d = new Date(dateStr);
+  var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return months[d.getMonth()] + ' ' + d.getDate();
+}
+
+function renderLeaderboardTable(lb, currentId, compact) {
+  var limit = compact ? 5 : 10;
+  var entries = lb.slice(0, limit);
+  if (entries.length === 0) return '';
+  var html = '<div class="lb-title">\u{1F3C6} LEADERBOARD</div>';
+  html += '<table class="lb-table"><thead><tr>';
+  html += '<th class="lb-rank">#</th><th></th><th>Player</th><th>Score</th>';
+  if (!compact) html += '<th>Waves</th>';
+  html += '<th>Date</th></tr></thead><tbody>';
+  for (var i = 0; i < entries.length; i++) {
+    var e = entries[i];
+    var isCurrent = currentId && e.id === currentId;
+    html += '<tr class="' + (isCurrent ? 'lb-current' : '') + '">';
+    html += '<td class="lb-rank">' + (i + 1) + '</td>';
+    if (e.username) {
+      html += '<td><img class="lb-avatar" src="https://github.com/' + e.username + '.png?size=48" onerror="this.replaceWith(Object.assign(document.createElement(\'span\'),{className:\'lb-anon\'}))" alt=""></td>';
+      html += '<td>' + e.username + '</td>';
+    } else {
+      html += '<td><span class="lb-anon"></span></td>';
+      html += '<td style="color:#8b949e">Anonymous</td>';
+    }
+    html += '<td class="lb-score">' + e.score + '</td>';
+    if (!compact) html += '<td>' + (e.wavesCleared || '-') + '</td>';
+    html += '<td>' + formatLBDate(e.date) + '</td>';
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  return html;
+}
+
+function renderTitleLeaderboard() {
+  var el = document.getElementById('title-leaderboard');
+  var lb = getLeaderboard();
+  if (lb.length === 0) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  el.innerHTML = renderLeaderboardTable(lb, null, true);
+}
+
+function renderEndScreenLeaderboard(containerId, saveAreaId, finalScore, wavesCleared) {
+  var container = document.getElementById(containerId);
+  var saveArea = document.getElementById(saveAreaId);
+  var lb = getLeaderboard();
+  var username = getGitHubUsername();
+  var qualifies = qualifiesForLeaderboard(finalScore);
+  var saveHTML = '';
+  if (qualifies && username) {
+    var entryId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    saveHTML = '<button class="lb-save-btn" id="save-btn-' + containerId + '" onclick="event.stopPropagation(); doSaveScore(\'' + containerId + '\', \'' + entryId + '\', ' + finalScore + ', ' + wavesCleared + ')">Save to Leaderboard</button>';
+  } else if (qualifies && !username) {
+    saveHTML = '<div class="lb-save-hint">Enter username on title screen to save score</div>';
+  }
+  saveArea.innerHTML = saveHTML;
+  if (lb.length > 0) {
+    container.style.display = 'block';
+    container.innerHTML = renderLeaderboardTable(lb, null, false);
+  } else {
+    container.style.display = 'none';
+  }
+}
+
+function doSaveScore(containerId, entryId, finalScore, wavesCleared) {
+  var username = getGitHubUsername();
+  var entry = {
+    username: username,
+    avatar: username ? 'https://github.com/' + username + '.png?size=48' : '',
+    score: finalScore,
+    wavesCleared: wavesCleared,
+    date: new Date().toISOString(),
+    id: entryId
+  };
+  var lb = addToLeaderboard(entry);
+  var btn = document.getElementById('save-btn-' + containerId);
+  if (btn) { btn.textContent = '\u2713 Saved!'; btn.disabled = true; }
+  var container = document.getElementById(containerId);
+  container.style.display = 'block';
+  container.innerHTML = renderLeaderboardTable(lb, entryId, false);
+  renderTitleLeaderboard();
+}
+
+function initGitHubUsername() {
+  var input = document.getElementById('gh-username-input');
+  var avatar = document.getElementById('gh-avatar-start');
+  var stored = getGitHubUsername();
+  if (stored) {
+    input.value = stored;
+    avatar.src = 'https://github.com/' + stored + '.png?size=40';
+    avatar.style.display = 'block';
+    avatar.onerror = function() { this.style.display = 'none'; };
+  }
+  var debounceTimer;
+  input.addEventListener('input', function() {
+    var val = this.value.trim();
+    clearTimeout(debounceTimer);
+    if (val) {
+      setGitHubUsername(val);
+      debounceTimer = setTimeout(function() {
+        avatar.src = 'https://github.com/' + val + '.png?size=40';
+        avatar.style.display = 'block';
+        avatar.onerror = function() { this.style.display = 'none'; };
+      }, 400);
+    } else {
+      setGitHubUsername('');
+      avatar.style.display = 'none';
+    }
+  });
+  input.addEventListener('keydown', function(e) { e.stopPropagation(); });
+  input.addEventListener('click', function(e) { e.stopPropagation(); });
+}
+
 // ========== GAME LOOP ==========
 
 function loop(timestamp) {
@@ -2047,6 +2312,8 @@ document.getElementById("win-screen").addEventListener("click", () => startGame(
 buildSpellHud();
 buildSpellRef();
 updateHighScoreDisplay();
+initGitHubUsername();
+renderTitleLeaderboard();
 initSpeech();
 requestAnimationFrame(loop);
 </script>
