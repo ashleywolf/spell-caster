@@ -76,12 +76,14 @@ canvas {
   bottom: 0;
   left: 0;
   right: 0;
-  padding: 10px 20px 14px;
+  padding: 10px 20px 18px;
+  max-height: 260px;
+  overflow-y: hidden;
   pointer-events: none;
   z-index: 10;
 }
 .transcript-line {
-  font-size: 22px;
+  font-size: 28px;
   font-weight: 600;
   text-align: center;
   margin-bottom: 4px;
@@ -242,6 +244,12 @@ canvas {
 }
 #mic-denied h2 { color: #f85149; margin-bottom: 10px; }
 #mic-denied p { color: #8b949e; max-width: 400px; text-align: center; }
+/* Stats display */
+.stats-container { margin: 16px 0; text-align: center; }
+.stats-title { font-size: 16px; font-weight: 700; color: #f7d060; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 2px; }
+.stats-row { font-size: 13px; color: #8b949e; margin-bottom: 3px; }
+.new-high { font-size: 24px; font-weight: 800; color: #f7d060; margin-bottom: 8px; animation: pulse 1s infinite; }
+#start-screen .high-score { font-size: 14px; color: #f7d060; margin-bottom: 16px; min-height: 20px; }
 </style>
 </head>
 <body>
@@ -271,6 +279,7 @@ canvas {
 <div id="start-screen">
   <h1>SPELL CASTER</h1>
   <div class="subtitle">Shout spells to defend your tower</div>
+  <div class="high-score" id="high-score-display"></div>
   <div class="spell-ref" id="spell-ref"></div>
   <div class="begin">Say "START" or click anywhere to begin</div>
   <div class="note">Requires Chrome/Edge with microphone access</div>
@@ -281,6 +290,8 @@ canvas {
   <h1>TOWER DESTROYED</h1>
   <div class="final-score" id="go-score"></div>
   <div class="final-score" id="go-wave"></div>
+  <div class="new-high" id="go-new-high" style="display:none">NEW HIGH SCORE!</div>
+  <div id="go-stats"></div>
   <div class="restart">Click or say "START" to play again</div>
 </div>
 
@@ -288,6 +299,8 @@ canvas {
 <div id="win-screen">
   <h1>VICTORY!</h1>
   <div class="final-score" id="win-score"></div>
+  <div class="new-high" id="win-new-high" style="display:none">NEW HIGH SCORE!</div>
+  <div id="win-stats"></div>
   <div class="restart">Click or say "START" to play again</div>
 </div>
 
@@ -432,9 +445,27 @@ let frozenZones = [];
 let lastTime = 0;
 let towerX, towerY;
 
+// High score
+let highScore = JSON.parse(localStorage.getItem('spellCaster_highScore') || '{"score":0,"wave":0}');
+
+// Game stats
+let gameStats = { spellsCast: {}, chaosCount: 0, totalCasts: 0, enemiesKilled: {}, damageTaken: 0, bestCombo: null, startTime: 0 };
+
+// Combo tracking
+let lastSpellCast = null;
+
+// Damage flash
+let damageFlashTimer = 0;
+
+// Ambient drone
+let droneNodes = null;
+
+// Wave countdown
+let countdownTonePlayed = { 3: false, 2: false, 1: false };
+
 // Transcript
 let transcriptLines = [];
-const MAX_TRANSCRIPT_LINES = 3;
+const MAX_TRANSCRIPT_LINES = 5;
 
 // Audio context
 let audioCtx = null;
@@ -650,7 +681,7 @@ function processSpell(transcript) {
       if (transcript.includes(kw)) {
         // Check cooldown
         if ((spellCooldowns[key] || 0) > 0) {
-          addTranscript(`"${transcript}" -- ${spell.name} on cooldown!`, "matched", "#8b949e");
+          addTranscript(`You said: "${transcript}" \u2192 ${spell.name} on cooldown!`, "matched", "#8b949e");
           playSound("denied");
           return;
         }
@@ -677,7 +708,7 @@ function castSpell(key, transcript) {
     card.classList.add("cast-flash");
   }
 
-  addTranscript(`"${transcript}" -- ${spell.emoji} ${spell.name}!`, "matched", spell.color);
+  addTranscript(`You said: "${transcript}" \u2192 ${spell.emoji} ${spell.name}`, "matched", spell.color);
 
   switch (key) {
     case "fireball": castFireball(); break;
@@ -686,6 +717,21 @@ function castSpell(key, transcript) {
     case "freeze": castFreeze(); break;
     case "heal": castHeal(); break;
   }
+
+  // Track stats
+  gameStats.spellsCast[key] = (gameStats.spellsCast[key] || 0) + 1;
+  gameStats.totalCasts++;
+
+  // Check for combos
+  if (lastSpellCast && (Date.now() - lastSpellCast.time) < 2000) {
+    const comboName = getComboName(lastSpellCast.key, key);
+    if (comboName) {
+      triggerCombo(comboName);
+      lastSpellCast = null;
+      return;
+    }
+  }
+  lastSpellCast = { key, time: Date.now() };
 }
 
 function castFireball() {
@@ -820,7 +866,9 @@ function castChaos(transcript) {
   const label = effect.good === false ? "BACKFIRE!" : (effect.good === true ? "LUCKY!" : "");
   const color = effect.good === false ? "#f85149" : (effect.good === true ? "#3fb950" : "#f7d060");
 
-  addTranscript(`"${transcript}" -- ??? CHAOS: ${effect.name}!`, "chaos", color);
+  addTranscript(`You said: "${transcript}" \u2192 ??? CHAOS`, "chaos");
+  gameStats.chaosCount++;
+  gameStats.totalCasts++;
   addPopup(W * 0.5, H * 0.35, effect.name + (label ? " " + label : ""), color, 28);
 
   // Spawn chaos particles
@@ -874,6 +922,8 @@ function castChaos(transcript) {
       towerHP = Math.max(0, towerHP - 10);
       screenShake = 8;
       screenShakeTime = 300;
+      damageFlashTimer = 100;
+      gameStats.damageTaken += 10;
       if (towerHP <= 0) gameOver();
       break;
     case "MEGA BLAST":
@@ -1098,6 +1148,7 @@ function killEnemy(e) {
   e.dead = true;
   e.hp = 0;
   score += ENEMY_TYPES[e.type].score;
+  gameStats.enemiesKilled[e.type] = (gameStats.enemiesKilled[e.type] || 0) + 1;
   playSound("enemyDeath");
   addExplosion(e.x, e.y, 30, ENEMY_TYPES[e.type].color);
 }
@@ -1149,11 +1200,16 @@ function startGame() {
   spawnTimer = 0;
   screenShake = 0;
   spellCooldowns = {};
+  damageFlashTimer = 0;
+  lastSpellCast = null;
+  gameStats = { spellsCast: {}, chaosCount: 0, totalCasts: 0, enemiesKilled: {}, damageTaken: 0, bestCombo: null, startTime: Date.now() };
 
   // Clear transcript
   document.getElementById("transcript-area").innerHTML = "";
   transcriptLines = [];
 
+  startDrone();
+  setDroneIntensity(true);
   startWave(0);
 }
 
@@ -1172,15 +1228,31 @@ function startWave(idx) {
 
 function gameOver() {
   gameState = "gameover";
+  stopDrone();
+  const isNewHigh = score > highScore.score;
+  if (isNewHigh) {
+    highScore = { score, wave: currentWave + 1 };
+    localStorage.setItem('spellCaster_highScore', JSON.stringify(highScore));
+  }
   document.getElementById("game-over").style.display = "flex";
   document.getElementById("go-score").textContent = "Score: " + score;
   document.getElementById("go-wave").textContent = "Reached Wave " + (currentWave + 1);
+  document.getElementById("go-new-high").style.display = isNewHigh ? "block" : "none";
+  document.getElementById("go-stats").innerHTML = buildStatsHTML();
 }
 
 function winGame() {
   gameState = "win";
+  stopDrone();
+  const isNewHigh = score > highScore.score;
+  if (isNewHigh) {
+    highScore = { score, wave: currentWave + 1 };
+    localStorage.setItem('spellCaster_highScore', JSON.stringify(highScore));
+  }
   document.getElementById("win-screen").style.display = "flex";
   document.getElementById("win-score").textContent = "Final Score: " + score;
+  document.getElementById("win-new-high").style.display = isNewHigh ? "block" : "none";
+  document.getElementById("win-stats").innerHTML = buildStatsHTML();
   playSound("waveComplete");
 }
 
@@ -1201,6 +1273,9 @@ function update(dt) {
     screenShakeTime -= dtMs;
     if (screenShakeTime <= 0) screenShake = 0;
   }
+
+  // Damage flash decay
+  if (damageFlashTimer > 0) damageFlashTimer -= dtMs;
 
   // Spawn enemies
   if (spawnQueue.length > 0) {
@@ -1267,6 +1342,8 @@ function update(dt) {
         e.attackTimer = 0;
         screenShake = 3;
         screenShakeTime = 100;
+        damageFlashTimer = 100;
+        gameStats.damageTaken += dmg;
         playSound("towerHit");
         if (towerHP <= 0) {
           towerHP = 0;
@@ -1376,6 +1453,8 @@ function update(dt) {
     } else {
       gameState = "waveComplete";
       waveRestTimer = 5000;
+      countdownTonePlayed = { 3: false, 2: false, 1: false };
+      setDroneIntensity(false);
       playSound("waveComplete");
       addPopup(W * 0.5, H * 0.35, "WAVE COMPLETE! +" + ((currentWave + 1) * 50), "#3fb950", 28);
     }
@@ -1388,8 +1467,15 @@ function update(dt) {
     for (const key of Object.keys(spellCooldowns)) {
       spellCooldowns[key] = Math.max(0, spellCooldowns[key] - dtMs);
     }
+    // Countdown tones at 3, 2, 1
+    const countSecs = Math.ceil(waveRestTimer / 1000);
+    if (countSecs <= 3 && countSecs >= 1 && !countdownTonePlayed[countSecs]) {
+      countdownTonePlayed[countSecs] = true;
+      playCountdownTone([0, 800, 600, 400][countSecs]);
+    }
     if (waveRestTimer <= 0) {
       gameState = "playing";
+      setDroneIntensity(true);
       startWave(currentWave + 1);
     }
   }
@@ -1646,13 +1732,32 @@ function render() {
   // Wave complete text
   if (gameState === "waveComplete") {
     const secs = Math.ceil(waveRestTimer / 1000);
-    ctx.font = "bold 20px 'Segoe UI', system-ui, sans-serif";
+    const nextWaveIdx = currentWave + 1;
     ctx.textAlign = "center";
-    ctx.fillStyle = "#8b949e";
-    ctx.fillText("Next wave in " + secs + "...", W * 0.5, H * 0.55);
+    if (secs <= 3) {
+      ctx.font = "bold 28px 'Segoe UI', system-ui, sans-serif";
+      ctx.fillStyle = "#e6edf3";
+      ctx.fillText("WAVE " + (nextWaveIdx + 1) + " INCOMING IN " + secs + "...", W * 0.5, H * 0.5);
+    } else {
+      ctx.font = "bold 20px 'Segoe UI', system-ui, sans-serif";
+      ctx.fillStyle = "#8b949e";
+      ctx.fillText("Preparing next wave...", W * 0.5, H * 0.5);
+    }
+    const preview = getWavePreview(nextWaveIdx);
+    if (preview) {
+      ctx.font = "16px 'Segoe UI', system-ui, sans-serif";
+      ctx.fillStyle = "#8b949e";
+      ctx.fillText(preview, W * 0.5, H * 0.5 + 30);
+    }
   }
 
   ctx.restore();
+
+  // Damage flash overlay (not affected by screen shake)
+  if (damageFlashTimer > 0) {
+    ctx.fillStyle = 'rgba(248, 81, 73, 0.3)';
+    ctx.fillRect(0, 0, W, H);
+  }
 }
 
 function drawTower() {
@@ -1708,6 +1813,216 @@ function withAlpha(hex, alpha) {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
+// ========== AMBIENT DRONE ==========
+
+function startDrone() {
+  ensureAudio();
+  if (droneNodes) stopDrone();
+  const g1 = audioCtx.createGain();
+  const g2 = audioCtx.createGain();
+  const o1 = audioCtx.createOscillator();
+  const o2 = audioCtx.createOscillator();
+  o1.type = 'sine';
+  o1.frequency.value = 80;
+  o2.type = 'sine';
+  o2.frequency.value = 120;
+  g1.gain.value = 0.02;
+  g2.gain.value = 0.01;
+  o1.connect(g1).connect(audioCtx.destination);
+  o2.connect(g2).connect(audioCtx.destination);
+  o1.start();
+  o2.start();
+  droneNodes = { o1, o2, g1, g2 };
+}
+
+function setDroneIntensity(intense) {
+  if (!droneNodes || !audioCtx) return;
+  const now = audioCtx.currentTime;
+  droneNodes.g1.gain.cancelScheduledValues(now);
+  droneNodes.g2.gain.cancelScheduledValues(now);
+  droneNodes.g1.gain.setValueAtTime(droneNodes.g1.gain.value, now);
+  droneNodes.g2.gain.setValueAtTime(droneNodes.g2.gain.value, now);
+  droneNodes.g1.gain.linearRampToValueAtTime(intense ? 0.06 : 0.02, now + 0.5);
+  droneNodes.g2.gain.linearRampToValueAtTime(intense ? 0.03 : 0.01, now + 0.5);
+}
+
+function stopDrone() {
+  if (!droneNodes) return;
+  try { droneNodes.o1.stop(); } catch(e) {}
+  try { droneNodes.o2.stop(); } catch(e) {}
+  droneNodes = null;
+}
+
+// ========== COMBOS ==========
+
+function getComboName(spell1, spell2) {
+  const pair = [spell1, spell2].sort().join('+');
+  const combos = {
+    'fireball+freeze': 'SHATTER',
+    'lightning+shield': 'SURGE',
+    'fireball+heal': 'PHOENIX',
+  };
+  return combos[pair] || null;
+}
+
+function triggerCombo(name) {
+  gameStats.bestCombo = name;
+  playComboSound();
+  addPopup(W * 0.5, H * 0.25, 'COMBO: ' + name + '!', '#f7d060', 32);
+
+  switch (name) {
+    case 'SHATTER':
+      for (const e of enemies) {
+        if (e.dead) continue;
+        if (e.frozen || e.slowTimer > 0) {
+          e.hp -= SPELLS.fireball.damage * 3;
+          e.flash = 12;
+          for (let i = 0; i < 15; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = 2 + Math.random() * 4;
+            particles.push({
+              type: 'explosion', x: e.x, y: e.y,
+              vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
+              life: 25 + Math.random() * 15, maxLife: 40,
+              radius: 3 + Math.random() * 4,
+              color: Math.random() > 0.5 ? '#89cff0' : '#ff6b35'
+            });
+          }
+          if (e.hp <= 0) killEnemy(e);
+        }
+      }
+      break;
+    case 'SURGE':
+      if (shieldWall) {
+        for (const e of enemies) {
+          if (e.dead) continue;
+          if (e.x >= shieldWall.x - 150 && e.x <= shieldWall.x + 150) {
+            addLightningBolt(shieldWall.x + shieldWall.width / 2, e.y - 80, e.x, e.y);
+            e.hp -= SPELLS.lightning.damage * 2;
+            e.flash = 8;
+            if (e.hp <= 0) killEnemy(e);
+          }
+        }
+      } else {
+        const sorted = [...enemies].filter(e => !e.dead).sort((a, b) => a.x - b.x);
+        let prev = { x: towerX - 30, y: towerY };
+        for (const t of sorted.slice(0, 6)) {
+          addLightningBolt(prev.x, prev.y, t.x, t.y);
+          t.hp -= SPELLS.lightning.damage;
+          t.flash = 8;
+          if (t.hp <= 0) killEnemy(t);
+          prev = { x: t.x, y: t.y };
+        }
+      }
+      break;
+    case 'PHOENIX': {
+      towerHP = Math.min(towerMaxHP, towerHP + SPELLS.heal.healAmount);
+      addPopup(towerX, towerY - 50, '+' + SPELLS.heal.healAmount + ' HP', '#50c878');
+      const target = nearestEnemy();
+      projectiles.push({
+        type: 'fireball',
+        x: towerX - 30, y: towerY,
+        tx: target ? target.x : 100, ty: target ? target.y : H * 0.5,
+        targetRef: target, speed: 10, trail: [],
+        damage: Math.round(SPELLS.fireball.damage * 1.5),
+        radius: Math.round(SPELLS.fireball.radius * 1.5)
+      });
+      for (let i = 0; i < 20; i++) {
+        particles.push({
+          type: 'heal',
+          x: towerX + (Math.random() - 0.5) * 40,
+          y: towerY + (Math.random() - 0.5) * 60,
+          vx: (Math.random() - 0.5) * 2, vy: -Math.random() * 3 - 1,
+          life: 40 + Math.random() * 20, maxLife: 60,
+          radius: 3 + Math.random() * 3
+        });
+      }
+      break;
+    }
+  }
+}
+
+function playComboSound() {
+  ensureAudio();
+  const now = audioCtx.currentTime;
+  [400, 600, 800].forEach(freq => {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.1, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(now);
+    osc.stop(now + 0.5);
+  });
+}
+
+// ========== WAVE PREVIEW & COUNTDOWN ==========
+
+function getWavePreview(waveIdx) {
+  if (waveIdx >= WAVES.length) return '';
+  const wave = WAVES[waveIdx];
+  const counts = {};
+  for (const group of wave.enemies) {
+    counts[group.type] = (counts[group.type] || 0) + group.count;
+  }
+  return Object.entries(counts).map(function(entry) {
+    return entry[1] + ' ' + ENEMY_TYPES[entry[0]].name + (entry[1] > 1 ? 's' : '');
+  }).join(', ');
+}
+
+function playCountdownTone(freq) {
+  ensureAudio();
+  const now = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'sine';
+  osc.frequency.value = freq;
+  gain.gain.setValueAtTime(0.12, now);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+  osc.connect(gain).connect(audioCtx.destination);
+  osc.start(now);
+  osc.stop(now + 0.3);
+}
+
+// ========== STATS & HIGH SCORE ==========
+
+function buildStatsHTML() {
+  const duration = Math.floor((Date.now() - gameStats.startTime) / 1000);
+  const mins = Math.floor(duration / 60);
+  const secs = duration % 60;
+  let html = '<div class="stats-container">';
+  html += '<div class="stats-title">BATTLE STATS</div>';
+  const spellParts = Object.entries(gameStats.spellsCast).map(function(entry) {
+    return SPELLS[entry[0]].emoji + ' ' + entry[0] + ': ' + entry[1];
+  });
+  html += '<div class="stats-row">Spells cast: ' + (spellParts.length > 0 ? spellParts.join(' | ') : 'None') + '</div>';
+  const chaosPercent = gameStats.totalCasts > 0 ? Math.round((gameStats.chaosCount / gameStats.totalCasts) * 100) : 0;
+  html += '<div class="stats-row">Chaos spells: ' + gameStats.chaosCount + ' (' + chaosPercent + '% of all casts)</div>';
+  const killParts = Object.entries(gameStats.enemiesKilled).map(function(entry) {
+    return ENEMY_TYPES[entry[0]].name + ': ' + entry[1];
+  });
+  html += '<div class="stats-row">Enemies killed: ' + (killParts.length > 0 ? killParts.join(', ') : 'None') + '</div>';
+  html += '<div class="stats-row">Damage taken: ' + gameStats.damageTaken + '</div>';
+  if (gameStats.bestCombo) {
+    html += '<div class="stats-row" style="color:#f7d060">Best combo: ' + gameStats.bestCombo + '</div>';
+  }
+  html += '<div class="stats-row">Duration: ' + mins + ':' + String(secs).padStart(2, '0') + '</div>';
+  html += '</div>';
+  return html;
+}
+
+function updateHighScoreDisplay() {
+  const el = document.getElementById('high-score-display');
+  if (!el) return;
+  if (highScore.score > 0) {
+    el.textContent = 'High Score: ' + highScore.score + ' (Wave ' + highScore.wave + ')';
+  } else {
+    el.textContent = '';
+  }
+}
+
 // ========== GAME LOOP ==========
 
 function loop(timestamp) {
@@ -1731,6 +2046,7 @@ document.getElementById("win-screen").addEventListener("click", () => startGame(
 
 buildSpellHud();
 buildSpellRef();
+updateHighScoreDisplay();
 initSpeech();
 requestAnimationFrame(loop);
 </script>
